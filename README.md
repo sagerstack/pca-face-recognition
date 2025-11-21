@@ -5,3 +5,6 @@ project using principal component analysis (PCA) for facial recognition
  - Eigenvalues and eigenvectors – PCA identifies the directions of maximum variance in data. 
  - Diagonalization – allows the covariance matrix to be simplified into a diagonal form for easier computation. 
 
+## References
+https://github.com/ageitgey/face_recognition
+https://github.com/hsahuja111/Face-Recognition-using-Principal-Component-Analysis
