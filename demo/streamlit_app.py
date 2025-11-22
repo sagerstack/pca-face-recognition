@@ -83,7 +83,7 @@ def main():
         }
 
         # Page selection
-        st.sidebar.title("Navigation")
+        st.sidebar.title("Home")
         page_name = st.sidebar.selectbox("Select Page:", options=list(PAGES.keys()))
 
         # Load the selected page with error handling
