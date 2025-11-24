@@ -5,6 +5,7 @@ logs/
 # Ignore dataset files
 data/
 
+
 # Python
 __pycache__/
 *.py[cod]

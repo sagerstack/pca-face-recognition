@@ -262,7 +262,7 @@ Complete tasks in order: Manual Prerequisites → Environment & Setup → Functi
 ## Documentation Notes
 - `/common` package: `data_utils.load_att_faces` loads normalized AT&T faces from `demo/data/ATnT`; `image_ops.flatten_images` returns flat matrix plus shape; `normalize_for_display` scales images to [0,1]; `selection` helpers map people to indices, captions, and templates.
 - `/math/pca_math.py`: SVD-based PCA (`compute_pca_svd`), projection/reconstruction (`project`, `reconstruct`), variance ratios, template building and distance computation. All functions operate on NumPy arrays; eigenvectors are columns.
-- Streamlit entrypoint: run `streamlit run demo/src/pca-facial-recognition.py`. Inconsolata is injected via CSS; Ant Design Tabs rendered through `components.html` with query-param sync; `Next` buttons advance tabs and reset when selections or `k` change.
+- Streamlit entrypoint: run `streamlit run demo/src/1-pca-eigenfaces.py`. Inconsolata is injected via CSS; Ant Design Tabs rendered through `components.html` with query-param sync; `Next` buttons advance tabs and reset when selections or `k` change.
 
 ## Changelog
 | Timestamp | Author | Change | Sections | Reason |

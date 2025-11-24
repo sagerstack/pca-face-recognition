@@ -13,6 +13,7 @@ import streamlit as st
 from PIL import Image
 from streamlit import components
 
+BASE_DIR = Path(__file__).resolve().parents[2]  # points to demo/
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -22,13 +23,12 @@ from common.image_ops import flatten_images, normalize_for_display
 from common.selection import (
     default_selection,
     indices_for_person,
-    person_display_name,
     selection_caption,
     unique_people,
 )
 
 # Load math/pca_math without clashing with built-in math module
-_pca_math_path = ROOT / "math" / "pca_math.py"
+_pca_math_path = BASE_DIR / "src" / "math" / "pca_math.py"
 _spec = importlib.util.spec_from_file_location("pca_math_module", _pca_math_path)
 _pca_math = importlib.util.module_from_spec(_spec)
 assert _spec and _spec.loader
@@ -41,18 +41,21 @@ explained_variance_ratio = _pca_math.explained_variance_ratio
 project = _pca_math.project
 reconstruct = _pca_math.reconstruct
 
+# Local display helper (1-based person index)
+def display_person(pid: int) -> str:
+    return f"Person {int(pid) + 1}"
+
 # Paths
-DATA_DIR = ROOT / "data" / "ATnT"
+DATA_DIR = BASE_DIR / "data" / "ATnT"
 
 # Tab config
-TAB_KEYS = ["1", "2", "3", "4", "5", "6"]
+TAB_KEYS = ["1", "2", "3", "4", "5"]
 TAB_LABELS = {
     "1": "1. Dataset & Intro",
     "2": "2. Image → Vector",
     "3": "3. Mean & Centering",
     "4": "4. Eigenfaces",
     "5": "5. Projection & Reconstruction",
-    "6": "6. Recognition",
 }
 
 
@@ -60,11 +63,13 @@ TAB_LABELS = {
 # Logging
 # -----------------------------
 def init_logger() -> logging.Logger:
-    """Initialize logger writing to logs/streamlit-app-YYYYMMDD-HHMMSS.log and capturing uncaught errors."""
-    logs_dir = ROOT / "logs"
+    """Initialize logger writing to a single log per session and capturing uncaught errors."""
+    logs_dir = BASE_DIR / "logs"
     logs_dir.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_path = logs_dir / f"streamlit-app-{timestamp}.log"
+    if "log_file_pca" not in st.session_state:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        st.session_state["log_file_pca"] = str(logs_dir / f"streamlit-app-{timestamp}.log")
+    log_path = Path(st.session_state["log_file_pca"])
 
     logger = logging.getLogger("pca_face_demo")
     logger.setLevel(logging.DEBUG)
@@ -179,6 +184,13 @@ def inject_inconsolata():
     )
 
 
+def scroll_to_top():
+    st.markdown(
+        "<script>window.scrollTo({top: 0, behavior: 'smooth'});</script>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_antd_tabs(active_key: str):
     items = [{"key": k, "label": v} for k, v in TAB_LABELS.items()]
     items_js = str(items).replace("'", '"')
@@ -229,6 +241,17 @@ def next_button(ready: bool = True, disabled_reason: str = ""):
 
 
 # -----------------------------
+# Scroll helper
+# -----------------------------
+def scroll_to_top():
+    components.v1.html(
+        "<script>window.scrollTo({top: 0, behavior: 'auto'});</script>",
+        height=0,
+        width=0,
+    )
+
+
+# -----------------------------
 # Plotting helpers
 # -----------------------------
 def line_plot_first_300(x_flat: np.ndarray):
@@ -264,7 +287,7 @@ def variance_plot(explained: np.ndarray, threshold: float = 0.95):
         f"Optimal k={ks[optimal_idx]}\n{cum[optimal_idx]:.1f}%",
         (ks[optimal_idx], cum[optimal_idx]),
         textcoords="offset points",
-        xytext=(10, -20),
+        xytext=(60, -10),
         ha="left",
         va="top",
         color="red",
@@ -273,7 +296,7 @@ def variance_plot(explained: np.ndarray, threshold: float = 0.95):
         f"Selected k={selected_k}\n{cum[selected_k-1]:.1f}%",
         (selected_k, cum[selected_k - 1]),
         textcoords="offset points",
-        xytext=(10, -20),
+        xytext=(20, -25),
         ha="left",
         va="top",
         color="blue",
@@ -290,7 +313,7 @@ def distance_bar_chart(distances: Dict[int, float]):
     person_ids = list(distances.keys())
     vals = np.array([distances[p] for p in person_ids])
     fig, ax = plt.subplots()
-    ax.barh([person_display_name(pid) for pid in person_ids], vals)
+    ax.barh([display_person(pid) for pid in person_ids], vals)
     ax.invert_yaxis()
     ax.set_xlabel("Distance")
     ax.set_title("Query face vs person templates")
@@ -306,8 +329,6 @@ def tab_dataset_intro(images, labels, x_image):
         "PCA helps us represent faces in a lower-dimensional space while keeping most of the important variation. "
         "We will follow one selected face through each step of the process to see how PCA transforms it."
     )
-    train_count = st.session_state.get("train_count", 6)
-
     def bordered_image_html(image: np.ndarray, caption: str, color: str, width: int = 90) -> str:
         img8 = np.clip(image * 255, 0, 255).astype(np.uint8)
         im = Image.fromarray(img8)
@@ -315,7 +336,7 @@ def tab_dataset_intro(images, labels, x_image):
         im.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
         return f"""
-        <div style="display:inline-block; border:2px solid {color}; padding:4px; margin:4px; text-align:center;">
+        <div style="display:inline-block; padding:4px; margin:4px; text-align:center;">
             <img src="data:image/png;base64,{b64}" width="{width}" />
             <div style="font-size:12px; margin-top:4px;">{caption}</div>
         </div>
@@ -324,17 +345,18 @@ def tab_dataset_intro(images, labels, x_image):
     col_left, col_right = st.columns([0.4, 0.6])
 
     with col_left:
+        scroll_to_top()
         st.markdown("**Sample faces from the dataset (top 5 people, 50 images)**")
         blocks = []
         top_people = sorted(unique_people(labels))[:5]
         for pid in top_people:
             pid_indices = indices_for_person(labels, pid)[:10]
             for i, idx in enumerate(pid_indices):
-                color = "royalblue" if i < train_count else "orange"
+                color = "royalblue"
                 blocks.append(
                     bordered_image_html(
                         images[idx],
-                        f"{person_display_name(int(pid))} #{i+1}",
+                        f"{display_person(int(pid))} #{i+1}",
                         color=color,
                         width=70,
                     )
@@ -347,16 +369,20 @@ def tab_dataset_intro(images, labels, x_image):
 
     with col_right:
         st.markdown("**Selected person (all images)**")
-        st.image(x_image, width=200, caption=selection_caption(st.session_state.selected_person, st.session_state.selected_idx))
+        st.image(
+            x_image,
+            width=200,
+            caption=f"Person: {display_person(st.session_state.selected_person)} (index {st.session_state.selected_idx})",
+        )
         person_indices = indices_for_person(labels, st.session_state.selected_person)
         selected_imgs = images[person_indices]
         blocks_sel = []
         for i in range(len(selected_imgs)):
-            color = "royalblue" if i < train_count else "orange"
+            color = "royalblue"
             blocks_sel.append(
                 bordered_image_html(
                     selected_imgs[i],
-                    f"{person_display_name(st.session_state.selected_person)} #{i+1}",
+                    f"{display_person(st.session_state.selected_person)} #{i+1}",
                     color=color,
                     width=90,
                 )
@@ -366,11 +392,13 @@ def tab_dataset_intro(images, labels, x_image):
             height=520,
             scrolling=True,
         )
+    scroll_to_top()
     next_button()
 
 
 def tab_image_vector(x_image, x_flat, shape, total_images: int):
     h, w = shape
+    scroll_to_top()
     st.subheader("2. Image → Vector")
     st.write(
         f"Each face image is a 2D grid of pixels (H={h}, W={w}) that we flatten into a {h*w}-length vector. "
@@ -380,18 +408,26 @@ def tab_image_vector(x_image, x_flat, shape, total_images: int):
     st.markdown(f"Total images: `{total_images}`, each row of `X` is one flattened face.")
     st.latex(rf"X \in \mathbb{{R}}^{{{total_images} \times ({h}\cdot {w})}},\quad X_i = \mathrm{{vec}}(I_i)")
 
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns([0.35, 0.65])
     with col1:
         st.markdown("**Original image**")
         st.image(x_image, width=250)
     with col2:
-        st.markdown("**Flattened pixel vector (first 300 values)**")
-        line_plot_first_300(x_flat)
+        st.markdown("**Flattened vector (all components, normalized 0–1)**")
+        m = min(1000, len(x_flat))
+        fig_bar, ax_bar = plt.subplots(figsize=(8, 3))
+        ax_bar.bar(np.arange(m), x_flat[:m], width=1.0)
+        ax_bar.set_xlabel("Component index (first 1000, row-major)")
+        ax_bar.set_ylabel("Normalized pixel value (0–1)")
+        ax_bar.set_title(f"Flattened vector (first {m} entries)")
+        st.pyplot(fig_bar, use_container_width=True)
+        st.caption("Shows the first 1000 pixels of the image as a 1D vector used for PCA (0=black, 1=white).")
     next_button()
 
 
 def tab_mean_center(mu, x_flat, shape):
     h, w = shape
+    scroll_to_top()
     st.subheader("3. Mean Face & Centering")
     st.write(
         "We first compute the average (mean) face and subtract it from each image. "
@@ -417,6 +453,7 @@ def tab_mean_center(mu, x_flat, shape):
 
 def tab_eigenfaces(eigvals, eigvecs, shape):
     h, w = shape
+    scroll_to_top()
     st.subheader("4. Eigenfaces (Principal Components)")
     st.write(
         "We compute eigenfaces by finding principal directions of variation in the centered faces. "
@@ -498,6 +535,7 @@ def tab_eigenfaces(eigvals, eigvecs, shape):
 
 def tab_projection_recon(x_flat, mu, eigvecs, shape):
     h, w = shape
+    scroll_to_top()
     st.subheader("5. Projection & Reconstruction")
     st.write(
         "We project the centered face onto the first k eigenfaces to get coefficients (θ_i). "
@@ -555,13 +593,26 @@ def tab_projection_recon(x_flat, mu, eigvecs, shape):
         ax2.set_xlim(1, ks[-1])
         ax2.set_xlabel("Number of components")
         ax2.set_ylabel("MSE")
-        ax2.set_title("Reconstruction MSE vs k")
+        ax2.set_title("Reconstruction MSE vs Number of principal components")
         st.pyplot(fig2)
-    next_button()
+
+    st.markdown("---")
+
+    # Navigation row: Back on left, Home on right
+    nav_cols = st.columns([1, 4, 1])
+    with nav_cols[0]:
+        if st.button("Back", key="back-5"):
+            set_active_tab("4")
+            st.rerun()
+    with nav_cols[2]:
+        if st.button("Home", key="home-5"):
+            set_active_tab("1")
+            st.rerun()
 
 
 def tab_recognition(X_flat, labels, mu, eigvecs, x_flat, shape):
     h, w = shape
+    scroll_to_top()
     st.subheader("6. Recognition in PCA Space")
     st.write(
         "For recognition, we represent each person by the mean of their PCA vectors and compare a new face to these "
@@ -579,11 +630,11 @@ def tab_recognition(X_flat, labels, mu, eigvecs, x_flat, shape):
         st.image(
             x_flat.reshape(h, w),
             width=250,
-            caption=f"True person: {person_display_name(st.session_state.selected_person)}",
+            caption=f"True person: {display_person(st.session_state.selected_person)}",
         )
     with col2:
         st.markdown("**Predicted person**")
-        st.write(f"**Prediction:** {person_display_name(best_pid)}")
+        st.write(f"**Prediction:** {display_person(best_pid)}")
         st.markdown("**Distances to each person template (lower is better)**")
         distance_bar_chart(dists)
     st.info(
@@ -613,17 +664,19 @@ def main():
         selected_person = st.sidebar.selectbox(
             "Choose a person",
             options=people,
-            format_func=person_display_name,
+            format_func=display_person,
             index=list(people).index(st.session_state.selected_person),
+            key="person_select_pca",
         )
         person_indices = indices_for_person(labels, selected_person)
         selected_idx = int(person_indices[0])
-        st.sidebar.markdown("---")
-        train_count = st.sidebar.slider(
-            "Training images per person (1-9)", min_value=1, max_value=9, value=st.session_state.get("train_count", 6), step=1
-        )
         k = st.sidebar.slider(
-            "Number of PCA components (k)", min_value=1, max_value=1000, value=min(st.session_state.k, 1000), step=1
+            "Number of PCA components (k)",
+            min_value=1,
+            max_value=400,
+            value=min(st.session_state.k, 400),
+            step=1,
+            key="k_slider_pca",
         )
 
         if "log_file" in st.session_state:
@@ -633,15 +686,12 @@ def main():
         changed = (
             int(selected_person) != st.session_state.selected_person
             or int(selected_idx) != st.session_state.selected_idx
-            or int(k) != st.session_state.k
-            or int(train_count) != st.session_state.get("train_count", train_count)
         )
 
         # Persist selections
         st.session_state.selected_person = int(selected_person)
         st.session_state.selected_idx = int(selected_idx)
         st.session_state.k = int(k)
-        st.session_state.train_count = int(train_count)
 
         if changed:
             set_active_tab("1")
@@ -654,16 +704,6 @@ def main():
         x_image = images[selected_idx]
         x_flat = X_flat[selected_idx]
         st.session_state.current_x_flat = x_flat
-
-        # Sidebar tab navigation (ensures tabs are always clickable)
-        tab_choice = st.sidebar.radio(
-            "Navigate tabs",
-            options=TAB_KEYS,
-            format_func=lambda k: TAB_LABELS[k],
-            index=TAB_KEYS.index(st.session_state.active_tab),
-        )
-        if tab_choice != st.session_state.active_tab:
-            set_active_tab(tab_choice)
 
         # AntD tabs (visual) still rendered
         render_antd_tabs(st.session_state.active_tab)
@@ -686,8 +726,6 @@ def main():
             safe_tab(tab_eigenfaces, eigvals, eigvecs, shape)
         elif st.session_state.active_tab == "5":
             safe_tab(tab_projection_recon, x_flat, mu, eigvecs, shape)
-        elif st.session_state.active_tab == "6":
-            safe_tab(tab_recognition, X_flat, labels, mu, eigvecs, x_flat, shape)
     except Exception:
         logger.exception("Unhandled error in Streamlit app")
         st.error("❌ An unexpected error occurred. Please check the log file under logs/ for details.")
